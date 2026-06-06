@@ -1,0 +1,8 @@
+[Unit]
+Description=Hourly habit check-in popup
+After=graphical-session.target
+PartOf=graphical-session.target
+
+[Service]
+Type=oneshot
+ExecStart=%h/bin/checkin poll

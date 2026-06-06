@@ -1,0 +1,166 @@
+#!/usr/bin/env bash
+#
+# checkin — hourly habit check-in logger.
+#
+# A systemd user timer runs `checkin poll` on the hour. The poll pops a
+# small zenity dialog ("what happened this past hour?" + a stand/hydrate
+# nudge) and appends the answer to the day's habit log — a plain markdown
+# file in your daily-log folder (an Obsidian vault or any directory of
+# dated notes). It only acts while the day is *armed* — `start-day` arms
+# it, `end-day` disarms it — so the clock never decides your day; you do.
+#
+# Subcommands:
+#   arm        mark today as active; seed today's habit log
+#   disarm     end today; check-ins stop until next arm
+#   status     print whether today is armed and how many entries logged
+#   log TEXT   append a timestamped row (used by poll; testable directly)
+#   summary    print today's habit-log table
+#   poll       if armed: pop the dialog and log the answer (timer entry)
+#
+# Config (optional): ${XDG_CONFIG_HOME:-~/.config}/checkin/config.env
+#   NOTES_DIR     base daily-log folder, default ~/notes (VAULT also
+#                 accepted for backward compatibility)
+#   DAILY_SUBDIR  default 10-Daily
+#
+# Dependency-light: bash, coreutils, and zenity (poll only).
+
+set -uo pipefail
+
+# --- configuration -----------------------------------------------------
+
+CHECKIN_CONFIG="${CHECKIN_CONFIG:-${XDG_CONFIG_HOME:-$HOME/.config}/checkin/config.env}"
+# shellcheck disable=SC1090
+[ -f "$CHECKIN_CONFIG" ] && . "$CHECKIN_CONFIG"
+
+# NOTES_DIR is the base daily-log folder. VAULT is accepted as a fallback
+# for older configs.
+NOTES_DIR="${NOTES_DIR:-${VAULT:-$HOME/notes}}"
+DAILY_SUBDIR="${DAILY_SUBDIR:-10-Daily}"
+
+STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/checkin"
+STATE_FILE="$STATE_DIR/armed"
+LOCK_FILE="$STATE_DIR/poll.lock"
+mkdir -p "$STATE_DIR"
+
+today()      { date +%F; }
+now_hhmm()   { date +%H:%M; }
+day_dir()    { printf '%s/%s/%s' "$NOTES_DIR" "$DAILY_SUBDIR" "$(today)"; }
+log_file()   { printf '%s/habit-log.md' "$(day_dir)"; }
+
+# --- helpers -----------------------------------------------------------
+
+is_armed() {
+    [ -f "$STATE_FILE" ] && [ "$(cat "$STATE_FILE" 2>/dev/null)" = "$(today)" ]
+}
+
+seed_log() {
+    local f; f="$(log_file)"
+    mkdir -p "$(day_dir)"
+    if [ ! -f "$f" ]; then
+        {
+            printf -- '---\ntype: habit-log\ndate: %s\n---\n\n' "$(today)"
+            printf '# Habit log — %s\n\n' "$(today)"
+            printf '| Time | Past hour |\n|------|-----------|\n'
+        } > "$f"
+    fi
+}
+
+# Append one row. Sanitises the text so it can't break the markdown table.
+append_row() {
+    local text="$1" f
+    f="$(log_file)"
+    seed_log
+    text="${text//|//}"          # pipes would break table cells
+    text="${text//$'\n'/ }"      # collapse newlines
+    text="${text//$'\t'/ }"
+    [ -z "$text" ] && text='(no response)'
+    printf '| %s | %s |\n' "$(now_hhmm)" "$text" >> "$f"
+}
+
+entry_count() {
+    local f; f="$(log_file)"
+    [ -f "$f" ] || { echo 0; return; }
+    grep -cE '^\| [0-9]{2}:[0-9]{2} \|' "$f"
+}
+
+# --- subcommands -------------------------------------------------------
+
+cmd_arm() {
+    today > "$STATE_FILE"
+    seed_log
+    echo "Day armed for $(today). Check-ins active (hourly, 06:00–23:00)."
+    echo "Habit log: $(log_file)"
+}
+
+cmd_disarm() {
+    if is_armed; then
+        rm -f "$STATE_FILE"
+        echo "Day disarmed. Check-ins stopped. Logged $(entry_count) entries today."
+    else
+        rm -f "$STATE_FILE"
+        echo "Already disarmed (no active day)."
+    fi
+}
+
+cmd_status() {
+    if is_armed; then
+        echo "armed for $(today) — $(entry_count) entries logged"
+    else
+        echo "not armed"
+    fi
+}
+
+cmd_log() {
+    append_row "${1:-}"
+}
+
+cmd_summary() {
+    local f; f="$(log_file)"
+    if [ -f "$f" ]; then
+        cat "$f"
+    else
+        echo "No habit log for $(today)."
+    fi
+}
+
+cmd_poll() {
+    is_armed || exit 0   # silent no-op when the day isn't active
+
+    # Only one dialog at a time — being away must not stack popups.
+    exec 9>"$LOCK_FILE"
+    flock -n 9 || exit 0
+
+    # GUI from a systemd user service: fall back to the session's display
+    # and bus if the unit environment didn't carry them through.
+    export DISPLAY="${DISPLAY:-:0}"
+    export DBUS_SESSION_BUS_ADDRESS="${DBUS_SESSION_BUS_ADDRESS:-unix:path=/run/user/$(id -u)/bus}"
+
+    local answer rc
+    answer="$(zenity --entry \
+        --title="Hourly check-in" \
+        --text=$'What happened this past hour?\n(stand up, stretch, drink water 💧)' \
+        --width=440 2>/dev/null)"
+    rc=$?
+
+    # rc 0 = OK (answer may be empty); anything else = cancelled/closed.
+    [ $rc -eq 0 ] || answer=''
+    append_row "$answer"
+}
+
+# --- dispatch ----------------------------------------------------------
+
+case "${1:-help}" in
+    arm)     cmd_arm ;;
+    disarm)  cmd_disarm ;;
+    status)  cmd_status ;;
+    log)     shift; cmd_log "${*:-}" ;;
+    summary) cmd_summary ;;
+    poll)    cmd_poll ;;
+    help|-h|--help)
+        sed -n '3,28p' "$0" | sed 's/^# \{0,1\}//'
+        ;;
+    *)
+        echo "checkin: unknown command '${1}'. Try 'checkin help'." >&2
+        exit 2
+        ;;
+esac

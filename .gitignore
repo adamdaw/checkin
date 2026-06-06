@@ -1,0 +1,5 @@
+# Local config (contains machine-specific paths)
+config.env
+
+# Test scratch
+test/tmp/

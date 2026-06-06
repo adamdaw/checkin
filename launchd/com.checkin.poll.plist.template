@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  macOS LaunchAgent for checkin. install.sh renders __CHECKIN_BIN__ to the
+  real path and loads it; or copy this to
+  ~/Library/LaunchAgents/com.checkin.poll.plist by hand, substitute the
+  path, and `launchctl load` it.
+
+  Fires at minute 0 of every hour. Unlike the systemd unit it isn't
+  hour-bounded — the armed-gate (start-day / end-day) is what keeps it
+  quiet overnight, so remember to run end-day. To hard-bound the hours,
+  replace the StartCalendarInterval dict with an <array> of per-hour
+  dicts (Hour 6…23, Minute 0).
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.checkin.poll</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>__CHECKIN_BIN__</string>
+        <string>poll</string>
+    </array>
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Minute</key>
+        <integer>0</integer>
+    </dict>
+    <key>RunAtLoad</key>
+    <false/>
+</dict>
+</plist>

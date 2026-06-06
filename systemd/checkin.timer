@@ -1,0 +1,12 @@
+[Unit]
+Description=Fire the hourly habit check-in (06:00–23:00)
+
+[Timer]
+# Top of every hour within the waking outer-rail. The day still has to be
+# armed (`/start-day`) for the popup to actually appear — this is just a
+# safety bound so nothing can fire at 4am if you forget to /end-day.
+OnCalendar=*-*-* 06..23:00:00
+Persistent=false
+
+[Install]
+WantedBy=timers.target
