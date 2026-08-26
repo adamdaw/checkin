@@ -80,11 +80,11 @@ per-day log file; its `type:` and heading derive from the name). Defaults:
 
 `install.sh` renders `launchd/com.checkin.poll.plist.template` to
 `~/Library/LaunchAgents/com.checkin.poll.plist` (substituting the real
-`checkin` path) and `launchctl load`s it. It fires `checkin poll` at the
+`checkin` path) and `launchctl bootstrap`s it. It fires `checkin poll` at the
 top of every hour. Unlike the Linux timer it isn't hour-bounded, so the
 armed-gate does the work — run `end-day` to stop evening popups (or edit
 the plist to a per-hour `StartCalendarInterval` array). To remove it:
-`launchctl unload ~/Library/LaunchAgents/com.checkin.poll.plist`.
+`launchctl bootout gui/$(id -u)/com.checkin.poll`.
 
 On macOS the popup is a native `osascript` dialog — **nothing to install**, no
 Homebrew, no `zenity`, no XQuartz. If the popup never appears, confirm the day

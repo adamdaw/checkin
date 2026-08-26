@@ -59,8 +59,9 @@ case "$(uname -s)" in
         plist="$agentdir/com.checkin.poll.plist"
         sed "s|__CHECKIN_BIN__|$bindir/checkin|g" \
             "$repo/launchd/com.checkin.poll.plist.template" > "$plist"
-        launchctl unload "$plist" 2>/dev/null || true
-        launchctl load "$plist"
+        domain="gui/$(id -u)"
+        launchctl bootout "$domain/com.checkin.poll" 2>/dev/null || true
+        launchctl bootstrap "$domain" "$plist"
         echo "Installed. Loaded launchd agent: $plist (fires hourly)."
         ;;
     *)

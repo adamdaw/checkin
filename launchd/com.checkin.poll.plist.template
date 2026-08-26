@@ -4,7 +4,7 @@
   macOS LaunchAgent for checkin. install.sh renders __CHECKIN_BIN__ to the
   real path and loads it; or copy this to
   ~/Library/LaunchAgents/com.checkin.poll.plist by hand, substitute the
-  path, and `launchctl load` it.
+  path, and `launchctl bootstrap gui/$(id -u) <plist>` it.
 
   Fires at minute 0 of every hour. Unlike the systemd unit it isn't
   hour-bounded — the armed-gate (start-day / end-day) is what keeps it
