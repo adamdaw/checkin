@@ -56,9 +56,10 @@ timer** on Linux, a **launchd agent** on macOS (auto-detected via
 `uname`).
 
 Config (optional) lives at `~/.config/checkin/config.env` — `NOTES_DIR`
-(the base daily-log folder) and `DAILY_SUBDIR`. Defaults: `~/notes` and
-`10-Daily`. (`VAULT` is still accepted in place of `NOTES_DIR` for older
-configs.)
+(the base daily-log folder), `DAILY_SUBDIR`, and `LOG_FILENAME` (the per-day
+log file; its `type:` and heading derive from the name). Defaults: `~/notes`,
+`10-Daily`, and `habit-log.md`. (`VAULT` is still accepted in place of
+`NOTES_DIR` for older configs.)
 
 ### macOS (launchd)
 
@@ -70,8 +71,11 @@ armed-gate does the work — run `end-day` to stop evening popups (or edit
 the plist to a per-hour `StartCalendarInterval` array). To remove it:
 `launchctl unload ~/Library/LaunchAgents/com.checkin.poll.plist`.
 
-GTK `zenity` from Homebrew may need [XQuartz](https://www.xquartz.org/)
-for its window to appear; install it if the popup doesn't show.
+On macOS the popup is GTK's native quartz window — **no XQuartz needed.**
+launchd runs a job with a minimal `PATH` and an empty locale, so `checkin`
+adds Homebrew to `PATH` (to find `zenity`) and sets a UTF-8 locale (so the
+prompt renders) when it runs on macOS. If the popup never appears, confirm
+`zenity` is installed: `brew install zenity`.
 
 ## Bundled skills
 
@@ -117,9 +121,12 @@ itself is not exercised; `poll` reduces to `log` for the testable core.
 - **State-gated, not clock-gated.** The day's boundaries are explicit
   actions, so the tool never nags outside a real day and the same timer
   can sit idle for weeks between uses without harm.
-- **GUI from a user service.** `poll` falls back to `DISPLAY=:0` and the
-  session bus at `/run/user/<uid>/bus` if the unit environment didn't
-  carry them through — the usual gotcha for GUI from systemd user units.
+- **GUI from a background scheduler.** On Linux `poll` falls back to
+  `DISPLAY=:0` and the session bus at `/run/user/<uid>/bus` if the systemd
+  unit environment didn't carry them through. On macOS it instead adds
+  Homebrew to `PATH` and a UTF-8 locale — launchd provides neither — and
+  lets zenity find the GUI session natively; setting `DISPLAY` there would
+  wrongly force an X11 backend.
 - **Table-safe input.** Pipe characters are rewritten and newlines
   collapsed so a stray `|` can't corrupt the markdown table.
 
