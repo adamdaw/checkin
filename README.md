@@ -14,9 +14,21 @@ It's deliberately small and legible — a dumb hourly heartbeat plus a plain
 markdown log you own. It also serves as the heartbeat for a wider
 daily-rhythm loop via the bundled `start-day` / `end-day` skills.
 
-> **Dependency:** the hourly prompt is a [`zenity`](https://help.gnome.org/users/zenity/)
-> dialog, so `zenity` must be installed (see [Requirements](#requirements)).
-> Everything else is bash, coreutils, and a systemd user instance.
+## TL;DR (macOS)
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/adamdaw/checkin/main/install.sh | bash
+```
+
+One command, nothing to install first — the popup uses macOS's built-in
+dialog, so there's no Homebrew and no `zenity`. The installer clones the repo,
+asks where your daily notes live, and schedules the hourly popup. Then:
+
+- **Start a day:** `checkin arm` (or the `/start-day` Claude Code skill).
+- **End a day:** `checkin disarm` (or `/end-day`). Popups stop until the next `arm`.
+
+On Linux the same command works; it installs a systemd user timer and needs
+`zenity` for the dialog (see [Requirements](#requirements)).
 
 ## How it works
 
@@ -44,22 +56,25 @@ daily-rhythm loop via the bundled `start-day` / `end-day` skills.
 
 ## Install
 
+The one-liner in [TL;DR](#tldr-macos) is the same script — reach for it when you
+don't already have the repo. If you've cloned it, run the installer directly:
+
 ```bash
 ./install.sh          # symlink bin, systemd units, and skills; enable timer
 ./install.sh copy     # copy instead of symlink
 ```
 
-This symlinks `bin/checkin` into `~/bin` and the bundled Claude Code
-skills (`skills/start-day`, `skills/end-day`) into `~/.claude/skills`,
-then sets up the hourly scheduler for your platform — a **systemd user
-timer** on Linux, a **launchd agent** on macOS (auto-detected via
-`uname`).
+Either way it symlinks (or copies) `bin/checkin` into `~/bin` and the bundled
+Claude Code skills (`skills/start-day`, `skills/end-day`) into `~/.claude/skills`,
+then sets up the hourly scheduler for your platform — a **systemd user timer**
+on Linux, a **launchd agent** on macOS (auto-detected via `uname`). The first
+run asks where your daily notes live and writes the config for you.
 
-Config (optional) lives at `~/.config/checkin/config.env` — `NOTES_DIR`
-(the base daily-log folder), `DAILY_SUBDIR`, and `LOG_FILENAME` (the per-day
-log file; its `type:` and heading derive from the name). Defaults: `~/notes`,
-`10-Daily`, and `habit-log.md`. (`VAULT` is still accepted in place of
-`NOTES_DIR` for older configs.)
+Config lives at `~/.config/checkin/config.env` — `NOTES_DIR` (the base
+daily-log folder, set during install), `DAILY_SUBDIR`, and `LOG_FILENAME` (the
+per-day log file; its `type:` and heading derive from the name). Defaults:
+`~/notes`, `10-Daily`, and `habit-log.md`. Edit it any time to move the log.
+(`VAULT` is still accepted in place of `NOTES_DIR` for older configs.)
 
 ### macOS (launchd)
 
@@ -71,11 +86,10 @@ armed-gate does the work — run `end-day` to stop evening popups (or edit
 the plist to a per-hour `StartCalendarInterval` array). To remove it:
 `launchctl unload ~/Library/LaunchAgents/com.checkin.poll.plist`.
 
-On macOS the popup is GTK's native quartz window — **no XQuartz needed.**
-launchd runs a job with a minimal `PATH` and an empty locale, so `checkin`
-adds Homebrew to `PATH` (to find `zenity`) and sets a UTF-8 locale (so the
-prompt renders) when it runs on macOS. If the popup never appears, confirm
-`zenity` is installed: `brew install zenity`.
+On macOS the popup is a native `osascript` dialog — **nothing to install**, no
+Homebrew, no `zenity`, no XQuartz. If the popup never appears, confirm the day
+is armed (`checkin status`) and that the agent is loaded
+(`launchctl list | grep checkin`).
 
 ## Bundled skills
 
@@ -91,21 +105,22 @@ They're plain markdown instructions; adapt them freely to your vault.
 
 ## Requirements
 
-- **`zenity`** — renders the hourly check-in dialog. Without it the popup
-  can't appear, so this is required for normal use. Install it:
-  - Debian/Ubuntu/Pop!_OS: `sudo apt install zenity`
-  - Fedora: `sudo dnf install zenity`
-  - Arch: `sudo pacman -S zenity`
-  - macOS: `brew install zenity`
+- **The dialog tool** — the hourly popup uses the OS's native tool:
+  - macOS: `osascript` — **built in, nothing to install.**
+  - Linux: `zenity` — install it:
+    - Debian/Ubuntu/Pop!_OS: `sudo apt install zenity`
+    - Fedora: `sudo dnf install zenity`
+    - Arch: `sudo pacman -S zenity`
 - **`bash` + coreutils** — the script itself.
-- **A scheduler** — the bundled timer is a **systemd user unit** (Linux;
-  standard on most desktops — check with `systemctl --user status`).
+- **A scheduler** — a **launchd agent** on macOS (built in) or a **systemd
+  user timer** on Linux (standard on most desktops — check with
+  `systemctl --user status`).
 
-The `checkin` script and the skills are cross-platform; `install.sh` sets
-up the right scheduler per OS (systemd on Linux, launchd on macOS — see
-[macOS](#macos-launchd)). The non-GUI subcommands (`arm`, `disarm`,
-`log`, `status`, `summary`) work without `zenity`; only the interactive
-`poll` needs it.
+The `checkin` script and the skills are cross-platform; `install.sh` sets up
+the right scheduler and dialog tool per OS (launchd + osascript on macOS,
+systemd + zenity on Linux — see [macOS](#macos-launchd)). The non-GUI
+subcommands (`arm`, `disarm`, `log`, `status`, `summary`) need neither the
+scheduler nor the dialog tool; only the interactive `poll` pops a dialog.
 
 ## Test
 
@@ -113,7 +128,7 @@ up the right scheduler per OS (systemd on Linux, launchd on macOS — see
 bash test/test-checkin.sh
 ```
 
-Covers arm/disarm/log/status/summary and the armed-gate. The zenity popup
+Covers arm/disarm/log/status/summary and the armed-gate. The dialog popup
 itself is not exercised; `poll` reduces to `log` for the testable core.
 
 ## Design notes

@@ -6,9 +6,19 @@
 #
 set -euo pipefail
 
-mode="${1:-link}"
 repo="$(cd "$(dirname "$0")" && pwd)"
 
+# Piped in via `curl … | bash`: the repo files aren't here. Clone it, then
+# re-run install.sh from the clone.
+if [ ! -f "$repo/bin/checkin" ]; then
+    command -v git >/dev/null || { echo "git is required to install." >&2; exit 1; }
+    dest="${CHECKIN_SRC:-$HOME/.local/share/checkin}"
+    if [ -d "$dest/.git" ]; then git -C "$dest" pull --ff-only --quiet
+    else git clone --quiet --depth 1 https://github.com/adamdaw/checkin "$dest"; fi
+    exec bash "$dest/install.sh" "$@"
+fi
+
+mode="${1:-link}"
 bindir="$HOME/bin"
 unitdir="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
 cfgdir="${XDG_CONFIG_HOME:-$HOME/.config}/checkin"
@@ -27,7 +37,21 @@ place "$repo/skills/start-day"        "$skilldir/start-day"
 place "$repo/skills/end-day"          "$skilldir/end-day"
 chmod +x "$repo/bin/checkin"
 
-[ -f "$cfgdir/config.env" ] || cp "$repo/config.env.example" "$cfgdir/config.env"
+if [ ! -f "$cfgdir/config.env" ]; then
+    notes_dir="$HOME/notes"
+    # Ask where their notes live. Open /dev/tty directly so the prompt works
+    # even under `curl | bash` (stdin is the piped script). If the terminal
+    # can't be opened — no controlling tty — skip the prompt and use the default.
+    if { exec 3<>/dev/tty; } 2>/dev/null; then
+        printf 'Where do your daily notes live? [%s]: ' "$notes_dir" >&3
+        read -r reply <&3 || reply=""
+        exec 3>&-
+        [ -n "$reply" ] && notes_dir="${reply/#\~/$HOME}"
+    fi
+    sed "s|^NOTES_DIR=.*|NOTES_DIR=\"$notes_dir\"|" \
+        "$repo/config.env.example" > "$cfgdir/config.env"
+    echo "Notes folder set to: $notes_dir"
+fi
 
 case "$(uname -s)" in
     Darwin)

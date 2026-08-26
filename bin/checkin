@@ -22,21 +22,10 @@
 #                 accepted for backward compatibility)
 #   DAILY_SUBDIR  default 10-Daily
 #
-# Dependency-light: bash, coreutils, and zenity (poll only).
+# Dependency-light: bash and coreutils. The poll dialog uses the OS's native
+# tool — osascript on macOS (built in, no install), zenity on Linux.
 
 set -uo pipefail
-
-# macOS launchd fixes. launchd hands a job a minimal PATH (no Homebrew) and an
-# empty locale. Without Homebrew on PATH, zenity isn't found. Without a UTF-8
-# locale, zenity mangles the multibyte characters in the poll prompt (the 💧
-# emoji) and exits 255 with "This option is not available" — no dialog. Both
-# only bite under launchd; an interactive shell already has them.
-case "$(uname -s)" in
-    Darwin)
-        PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
-        export LANG="${LANG:-en_US.UTF-8}" LC_ALL="${LC_ALL:-en_US.UTF-8}"
-        ;;
-esac
 
 # --- configuration -----------------------------------------------------
 
@@ -155,25 +144,33 @@ cmd_poll() {
     # unbound (set -u) by the time an EXIT trap fires after the function returns.
     trap "rmdir '$lockdir' 2>/dev/null" EXIT
 
-    # GUI from a systemd user service (Linux): fall back to the session's
-    # display and bus if the unit environment didn't carry them through.
-    # NOT on macOS: exporting DISPLAY forces zenity onto an X11 backend that
-    # needs XQuartz, so the native quartz dialog fails instantly and the poll
-    # records a blank. macOS zenity finds the GUI session on its own.
-    if [ "$(uname -s)" != Darwin ]; then
+    local prompt=$'What happened this past hour?\n(stand up, stretch, drink water 💧)'
+    local answer
+
+    if [ "$(uname -s)" = Darwin ]; then
+        # macOS: osascript is built in — no Homebrew, no XQuartz. A cancel or
+        # timeout raises an error the `try` swallows, returning "" (same as an
+        # empty OK), so both land as (no response) in append_row.
+        answer="$(osascript 2>/dev/null <<EOF
+try
+  set r to display dialog "$prompt" default answer "" with title "Hourly check-in"
+  return text returned of r
+end try
+return ""
+EOF
+)"
+    else
+        # GUI from a systemd user service (Linux): fall back to the session's
+        # display and bus if the unit environment didn't carry them through.
         export DISPLAY="${DISPLAY:-:0}"
         export DBUS_SESSION_BUS_ADDRESS="${DBUS_SESSION_BUS_ADDRESS:-unix:path=/run/user/$(id -u)/bus}"
+        answer="$(zenity --entry \
+            --title="Hourly check-in" \
+            --text="$prompt" \
+            --width=440 2>/dev/null)"
+        # rc 0 = OK (answer may be empty); anything else = cancelled/closed.
+        [ $? -eq 0 ] || answer=''
     fi
-
-    local answer rc
-    answer="$(zenity --entry \
-        --title="Hourly check-in" \
-        --text=$'What happened this past hour?\n(stand up, stretch, drink water 💧)' \
-        --width=440 2>/dev/null)"
-    rc=$?
-
-    # rc 0 = OK (answer may be empty); anything else = cancelled/closed.
-    [ $rc -eq 0 ] || answer=''
     append_row "$answer"
 }
 
