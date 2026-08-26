@@ -26,6 +26,18 @@
 
 set -uo pipefail
 
+# macOS launchd fixes. launchd hands a job a minimal PATH (no Homebrew) and an
+# empty locale. Without Homebrew on PATH, zenity isn't found. Without a UTF-8
+# locale, zenity mangles the multibyte characters in the poll prompt (the 💧
+# emoji) and exits 255 with "This option is not available" — no dialog. Both
+# only bite under launchd; an interactive shell already has them.
+case "$(uname -s)" in
+    Darwin)
+        PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
+        export LANG="${LANG:-en_US.UTF-8}" LC_ALL="${LC_ALL:-en_US.UTF-8}"
+        ;;
+esac
+
 # --- configuration -----------------------------------------------------
 
 CHECKIN_CONFIG="${CHECKIN_CONFIG:-${XDG_CONFIG_HOME:-$HOME/.config}/checkin/config.env}"
@@ -36,6 +48,7 @@ CHECKIN_CONFIG="${CHECKIN_CONFIG:-${XDG_CONFIG_HOME:-$HOME/.config}/checkin/conf
 # for older configs.
 NOTES_DIR="${NOTES_DIR:-${VAULT:-$HOME/notes}}"
 DAILY_SUBDIR="${DAILY_SUBDIR:-10-Daily}"
+LOG_FILENAME="${LOG_FILENAME:-habit-log.md}"
 
 STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/checkin"
 STATE_FILE="$STATE_DIR/armed"
@@ -45,7 +58,7 @@ mkdir -p "$STATE_DIR"
 today()      { date +%F; }
 now_hhmm()   { date +%H:%M; }
 day_dir()    { printf '%s/%s/%s' "$NOTES_DIR" "$DAILY_SUBDIR" "$(today)"; }
-log_file()   { printf '%s/habit-log.md' "$(day_dir)"; }
+log_file()   { printf '%s/%s' "$(day_dir)" "$LOG_FILENAME"; }
 
 # --- helpers -----------------------------------------------------------
 
@@ -54,12 +67,17 @@ is_armed() {
 }
 
 seed_log() {
-    local f; f="$(log_file)"
+    local f base title first
+    f="$(log_file)"
+    base="${LOG_FILENAME%.md}"          # e.g. hourly-log  -> frontmatter type
+    title="${base//-/ }"                # hourly log
+    first="$(printf '%s' "${title:0:1}" | tr '[:lower:]' '[:upper:]')"
+    title="${first}${title:1}"          # Hourly log       -> heading
     mkdir -p "$(day_dir)"
     if [ ! -f "$f" ]; then
         {
-            printf -- '---\ntype: habit-log\ndate: %s\n---\n\n' "$(today)"
-            printf '# Habit log — %s\n\n' "$(today)"
+            printf -- '---\ntype: %s\ndate: %s\n---\n\n' "$base" "$(today)"
+            printf '# %s — %s\n\n' "$title" "$(today)"
             printf '| Time | Past hour |\n|------|-----------|\n'
         } > "$f"
     fi
@@ -127,13 +145,25 @@ cmd_poll() {
     is_armed || exit 0   # silent no-op when the day isn't active
 
     # Only one dialog at a time — being away must not stack popups.
-    exec 9>"$LOCK_FILE"
-    flock -n 9 || exit 0
+    # Portable atomic lock: mkdir succeeds for exactly one caller. flock is
+    # Linux-only (absent on macOS), where it silently failed the whole poll.
+    # A SIGKILL mid-dialog leaves a stale lockdir; the EXIT trap clears every
+    # normal exit, so only an uncatchable kill would need a manual rmdir.
+    local lockdir="${LOCK_FILE}.d"
+    mkdir "$lockdir" 2>/dev/null || exit 0
+    # Expand the path into the trap NOW: lockdir is function-local and would be
+    # unbound (set -u) by the time an EXIT trap fires after the function returns.
+    trap "rmdir '$lockdir' 2>/dev/null" EXIT
 
-    # GUI from a systemd user service: fall back to the session's display
-    # and bus if the unit environment didn't carry them through.
-    export DISPLAY="${DISPLAY:-:0}"
-    export DBUS_SESSION_BUS_ADDRESS="${DBUS_SESSION_BUS_ADDRESS:-unix:path=/run/user/$(id -u)/bus}"
+    # GUI from a systemd user service (Linux): fall back to the session's
+    # display and bus if the unit environment didn't carry them through.
+    # NOT on macOS: exporting DISPLAY forces zenity onto an X11 backend that
+    # needs XQuartz, so the native quartz dialog fails instantly and the poll
+    # records a blank. macOS zenity finds the GUI session on its own.
+    if [ "$(uname -s)" != Darwin ]; then
+        export DISPLAY="${DISPLAY:-:0}"
+        export DBUS_SESSION_BUS_ADDRESS="${DBUS_SESSION_BUS_ADDRESS:-unix:path=/run/user/$(id -u)/bus}"
+    fi
 
     local answer rc
     answer="$(zenity --entry \
